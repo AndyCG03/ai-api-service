@@ -1,37 +1,65 @@
-# FastAPI y servidor
+# ===============================
+# API
+# ===============================
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
+aiofiles==23.2.1
 
-# Seguridad y validación
+# ===============================
+# Config / Seguridad
+# ===============================
 pydantic==2.5.3
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
 slowapi==0.1.9
+python-jose[cryptography]==3.3.0
 
-# IA/ML - Core
+# ===============================
+# Core numérico (CLAVE)
+# ===============================
+numpy==1.26.4
+scipy==1.11.4
+
+# ===============================
+# Torch stack (COMPATIBLE)
+# ===============================
 torch==2.1.2
-transformers==4.37.0
-sentence-transformers==2.3.1
+torchvision==0.16.2
+torchaudio==2.1.2
 accelerate==0.26.1
 
-# Audio/Whisper
+# ===============================
+# Transformers / Embeddings
+# ===============================
+transformers==4.36.2
+sentence-transformers==2.2.2
+
+# ===============================
+# LLM cuantizados (GGUF)
+# ===============================
+llama-cpp-python==0.2.27
+# ctransformers==0.2.27  # (opcional, NO ambos)
+
+# ===============================
+# Audio / Whisper
+# ===============================
 openai-whisper==20231117
 librosa==0.10.1
 soundfile==0.12.1
 
-# LLM cuantizados (elegir uno)
-# llama-cpp-python==0.2.27
-# ctransformers==0.2.27
+# ===============================
+# OCR
+# ===============================
+easyocr==1.7.1
 
-# Utilidades
-numpy==1.26.3
-aiofiles==23.2.1
-python-jose[cryptography]==3.3.0
-
+# ===============================
 # Logging
+# ===============================
 loguru==0.7.2
 
+# ===============================
 # Testing
+# ===============================
 pytest==7.4.4
 httpx==0.26.0
