@@ -1,7 +1,7 @@
 # AI API Service
 
 <p align="center">
-  <img src="assets/ai-api-service.png" alt="AI API Service" width="200"/>
+  <img src="assets/ai-api-service.png" alt="AI API Service" width="500"/>
 </p>
 
 API de servicios de IA con FastAPI para dispositivos de bajos recursos.
