@@ -1,6 +1,6 @@
 # AI API Service
 
-<p align="center">
+<p align="center" class="sm:text-left text-center">
   <img src="assets/ai-api-service.png" alt="AI API Service" width="500"/>
 </p>
 
