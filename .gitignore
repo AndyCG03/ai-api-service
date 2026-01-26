@@ -1,0 +1,193 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.admin
+.admin_key_*.txt
+api_key_backups/
+
+# Models
+data/models/*
+!data/models/.gitkeep
+!data/models/llm/
+!data/models/llm/*.gguf
+
+# Cache y descargas de modelos
+.huggingface/
+.cache/
+models/
+pretrained/
+downloads/
+
+# Database
+data/api_keys.db
+data/*.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build/Deploy
+dist/
+build/
+*.egg-info/
+*.egg
+ai_api_service.egg-info/
+
+# Docs
+docs/_build/
+
+# Static files (si generas automáticamente)
+static/swagger-ui/  # Si lo descargas automáticamente
+
+# Temporal
+temp/
+tmp/
+*.tmp
+*.temp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor específico
+.project
+.pydevproject
+.settings/
+
+# MyPy
+.mypy_cache/
+
+# Black
+.black.cache
+
+# Coverage
+.coverage.*
+cover/
+
+# Poetry
+poetry.lock
+
+# Pipenv
+Pipfile.lock
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Secrets
+secrets.json
+credentials.json
+service-account-*.json
+
+# Audio/Video processing temp files
+*.mp3.temp
+*.wav.temp
+*.mp4.temp
+*.webm.temp
+
+# Uvicorn
+uvicorn.log
+
+# Docker (si usas)
+docker-compose.override.yml
+
+# Backup files
+*.bak
+*.backup
+
+# Archivos de configuración local
+config.local.yaml
+config.local.json
+config.local.toml
+
+# Archivos de checkpoint de modelos
+*.checkpoint
+*.safetensors
+*.bin
+
+# Modelos descargados automáticamente
+~/.cache/
+~/.torch/
+~/.keras/
+
+# EasyOCR models (se descargan automáticamente)
+~/.EasyOCR/
+user_network/
+*.pth
+
+# Whisper models cache
+~/.cache/whisper/
+
+# Sentence Transformers cache
+~/.cache/torch/sentence_transformers/
+
+# Archivos generados por usuario
+uploads/
+temp_uploads/
+processed_files/
+
+# SQLite journal files
+*-journal
+*.db-journal
+*.sqlite-journal
+
+# Notebook output
+.ipynb_output/
+
+# Archivos de sistema
+ehthumbs.db
+*.lnk
+
+# Específico del proyecto
+api_key_*.txt
+key_*.txt
+*.key
+*.secret
+
+# Archivos de dump (si usas)
+dump.rdb
+*.dump
+
+# Perf files (si usas profiling)
+*.prof
+*.profraw
