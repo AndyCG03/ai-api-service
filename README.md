@@ -1,6 +1,18 @@
 # AI API Service
 
-<p align="center" class="sm:text-left text-center">
+<style>
+  .responsive-align {
+    text-align: center;
+  }
+  
+  @media (min-width: 640px) {
+    .responsive-align {
+      text-align: left;
+    }
+  }
+</style>
+
+<p class="responsive-align">
   <img src="assets/ai-api-service.png" alt="AI API Service" width="500"/>
 </p>
 
