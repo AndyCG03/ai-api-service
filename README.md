@@ -1,5 +1,9 @@
 # AI API Service
 
+<p align="center">
+  <img src="assets/ai-api-service.png" alt="AI API Service" width="700"/>
+</p>
+
 API de servicios de IA con FastAPI para dispositivos de bajos recursos.
 
 ## 🚀 Inicio Rápido
@@ -111,7 +115,7 @@ Edita `.env` para personalizar:
 
 ## 📦 Gestión de Modelos
 
-Coloca modelos GGUF en `data/models/llm/` o déjalos descargarse automáticamente. Los modelos de Whisper, Embeddings y OCR se descargan automáticamente en la primera ejecución.
+Coloca modelos GGUF en `data/models/llm/`. Los modelos de Whisper, Embeddings y OCR se descargan automáticamente en la primera ejecución.
 
 ## 🔐 Administración de API Keys
 
