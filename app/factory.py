@@ -11,7 +11,7 @@ from loguru import logger
 from app.config import settings
 from app.auth.rate_limit import limiter
 from app.models.loader import model_loader
-from app.routers import admin, generate, ocr, transcribe, embeddings
+from app.routers import admin, business, generate, ocr, transcribe, embeddings
 
 
 @asynccontextmanager
@@ -117,6 +117,7 @@ def _configure_routes(app: FastAPI):
         ("transcribe", transcribe.router),
         ("embeddings", embeddings.router),
         ("ocr", ocr.router), 
+        ("business", business.router),
     ]
     
     for name, router in routers:

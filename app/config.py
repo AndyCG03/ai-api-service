@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     enable_whisper: bool = Field(True, env="ENABLE_WHISPER")
     enable_embeddings: bool = Field(True, env="ENABLE_EMBEDDINGS")
     enable_ocr: bool = Field(True, env="ENABLE_OCR")
+    enable_classifier: bool = Field(True, env="ENABLE_CLASSIFIER")
+    enable_sentiment: bool = Field(True, env="ENABLE_SENTIMENT")
+    enable_ner: bool = Field(True, env="ENABLE_NER")
+    enable_summarizer: bool = Field(True, env="ENABLE_SUMMARIZER")
+    enable_translator: bool = Field(True, env="ENABLE_TRANSLATOR")
 
     # ======================
     # LLM Settings
@@ -63,6 +68,44 @@ class Settings(BaseSettings):
     ocr_detector_path_env: Optional[str] = Field(None, env="OCR_DETECTOR_PATH")
     ocr_recognizer_path_env: Optional[str] = Field(None, env="OCR_RECOGNIZER_PATH")
     ocr_language_path_env: Optional[str] = Field(None, env="OCR_LANGUAGE_PATH")
+
+
+    # TODO Rectificar luego la estructura del config para consistencia
+    # ======================
+    # Nuevos Modelos Configuración
+    # ======================
+    classifier_model_name: str = Field(
+        "distilbert-base-uncased-finetuned-sst-2-english", 
+        env="CLASSIFIER_MODEL_NAME"
+    )
+    sentiment_model_name: str = Field(
+        "finiteautomata/beto-sentiment-analysis", 
+        env="SENTIMENT_MODEL_NAME"
+    )
+    ner_model_name: str = Field(
+        "mrm8488/bert-spanish-cased-finetuned-ner", 
+        env="NER_MODEL_NAME"
+    )
+    summarizer_model_name: str = Field(
+        "google/pegasus-cnn_dailymail", 
+        env="SUMMARIZER_MODEL_NAME"
+    )
+    translator_model_name: str = Field(
+        "Helsinki-NLP/opus-mt-es-en", 
+        env="TRANSLATOR_MODEL_NAME"
+    )
+    
+    # ======================
+    # Configuraciones de nuevos modelos
+    # ======================
+    classifier_max_length: int = Field(512, env="CLASSIFIER_MAX_LENGTH")
+    sentiment_max_length: int = Field(256, env="SENTIMENT_MAX_LENGTH")
+    ner_max_length: int = Field(384, env="NER_MAX_LENGTH")
+    summarizer_max_length: int = Field(150, env="SUMMARIZER_MAX_LENGTH")
+    translator_max_length: int = Field(200, env="TRANSLATOR_MAX_LENGTH")
+
+
+
 
     # ======================
     # Server
@@ -130,6 +173,46 @@ class Settings(BaseSettings):
         if path.is_absolute():
             return path.resolve()
         return self.base_models_path / path
+    
+    @property
+    def transformer_models_path(self) -> Path:
+        """Ruta para modelos Transformers (descargados automáticamente)"""
+        return self.base_models_path / "transformers"
+    
+    @property
+    def classifier_model_path(self) -> Path:
+        """Ruta para el modelo de clasificación"""
+        model_dir = self.transformer_models_path / "classifier"
+        model_name_safe = self.classifier_model_name.replace("/", "_")
+        return model_dir / model_name_safe
+    
+    @property
+    def sentiment_model_path(self) -> Path:
+        """Ruta para el modelo de sentimiento"""
+        model_dir = self.transformer_models_path / "sentiment"
+        model_name_safe = self.sentiment_model_name.replace("/", "_")
+        return model_dir / model_name_safe
+    
+    @property
+    def ner_model_path(self) -> Path:
+        """Ruta para el modelo NER"""
+        model_dir = self.transformer_models_path / "ner"
+        model_name_safe = self.ner_model_name.replace("/", "_")
+        return model_dir / model_name_safe
+    
+    @property
+    def summarizer_model_path(self) -> Path:
+        """Ruta para el modelo de resumen"""
+        model_dir = self.transformer_models_path / "summarizer"
+        model_name_safe = self.summarizer_model_name.replace("/", "_")
+        return model_dir / model_name_safe
+    
+    @property
+    def translator_model_path(self) -> Path:
+        """Ruta para el modelo de traducción"""
+        model_dir = self.transformer_models_path / "translator"
+        model_name_safe = self.translator_model_name.replace("/", "_")
+        return model_dir / model_name_safe
     
     # ======================
     # Helpers
