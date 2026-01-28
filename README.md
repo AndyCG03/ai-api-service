@@ -124,3 +124,17 @@ Usa el endpoint `/admin/keys/` con una clave de administrador para:
 - Ver estadísticas de uso
 
 **Importante**: Guarda las API keys al crearlas, no podrás verlas nuevamente.
+
+## 📄 Licencia
+
+Copyright © 2026 Andy Clemente Gago. Todos los derechos reservados.
+
+Este proyecto está licenciado bajo la **GNU General Public License v3.0**.
+
+**Lo que significa:**
+- ✅ Puedes usar, modificar y distribuir este software
+- ✅ Puedes usarlo en proyectos comerciales
+- ⚠️ **CUALQUIER trabajo derivado DEBE ser también open source con GPL v3**
+- ⚠️ **Debes publicar el código fuente** de cualquier producto que incluya este código
+
+Para más detalles, ver el archivo [LICENSE](LICENSE).
