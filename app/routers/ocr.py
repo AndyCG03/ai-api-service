@@ -1,32 +1,141 @@
-# app/routers/ocr.py
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request, Form
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Tuple, Any
 from app.auth.api_keys import verify_api_key
 from app.auth.rate_limit import limiter
 from app.models.loader import model_loader
-from fastapi import Request
 import base64
 import io
 from PIL import Image
 import numpy as np
+import time
 
 router = APIRouter(prefix="/ocr", tags=["OCR"])
+
+
+# ======================
+# Helpers
+# ======================
+def bytes_to_np_image(image_bytes: bytes) -> np.ndarray:
+    """Convierte bytes de imagen a array numpy."""
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    return np.array(image)
+
+
+def safe_readtext(reader, image_bytes: bytes, detail: bool = True, paragraph: bool = True) -> Any:
+    """
+    Wrapper seguro para easyocr.readtext que maneja diferentes estructuras de retorno.
+    """
+    if not reader:
+        raise ValueError("OCR reader no disponible")
+    
+    image_np = bytes_to_np_image(image_bytes)
+    
+    try:
+        if detail:
+            # Con detail=True, easyocr devuelve lista de tuplas (bbox, text, confidence)
+            result = reader.readtext(
+                image_np,
+                detail=detail,
+                paragraph=paragraph,
+                batch_size=1,
+                workers=0
+            )
+            # Verificar estructura
+            if result and len(result) > 0:
+                if isinstance(result[0], tuple) and len(result[0]) >= 3:
+                    return result
+                else:
+                    # Si no tiene 3 elementos, crear estructura consistente
+                    processed_result = []
+                    for item in result:
+                        if isinstance(item, tuple):
+                            if len(item) == 3:
+                                processed_result.append(item)
+                            elif len(item) == 2:
+                                # Asumir que es (text, bbox) o similar
+                                bbox, text = item[0], item[1]
+                                processed_result.append((bbox, text, 1.0))
+                            else:
+                                processed_result.append(([], item, 1.0))
+                        else:
+                            # Si es solo texto
+                            processed_result.append(([], str(item), 1.0))
+                    return processed_result
+        else:
+            # Con detail=False, easyocr devuelve solo texto
+            result = reader.readtext(
+                image_np,
+                detail=detail,
+                paragraph=paragraph,
+                batch_size=1,
+                workers=0
+            )
+            return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error en procesamiento OCR: {str(e)}"
+        )
+
+
+def normalize_ocr_result(result: Any, detail: bool) -> List[dict]:
+    """
+    Normaliza el resultado de OCR a una estructura consistente.
+    """
+    normalized = []
+
+    if detail:
+        # Manejar diferentes estructuras de resultado
+        for item in result:
+            if isinstance(item, tuple):
+                if len(item) == 3:
+                    bbox, text, conf = item
+                elif len(item) == 2:
+                    bbox, text = item
+                    conf = 1.0  # Valor por defecto
+                else:
+                    continue  # Saltar elementos inválidos
+            else:
+                # Si no es tupla, asumir que es solo texto
+                text = str(item)
+                bbox = []
+                conf = 1.0
+            
+            # Convertir bbox si es necesario
+            if hasattr(bbox, 'tolist'):
+                bbox = bbox.tolist()
+            elif isinstance(bbox, (list, tuple)):
+                bbox = list(bbox)
+            
+            normalized.append({
+                "bbox": bbox,
+                "text": text,
+                "confidence": float(conf) if conf else 1.0
+            })
+    else:
+        # detail=False: solo texto
+        for text in result:
+            normalized.append({
+                "text": str(text),
+                "bbox": [],
+                "confidence": 1.0
+            })
+    
+    return normalized
 
 
 # ======================
 # Models
 # ======================
 class OCRTextResult(BaseModel):
-    """Resultado individual de texto detectado"""
     text: str
     confidence: float = Field(..., ge=0.0, le=1.0)
-    bbox: List[List[float]]  # [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+    bbox: List[List[float]]
     page: Optional[int] = None
 
 
 class OCRResponse(BaseModel):
-    """Respuesta completa de OCR"""
     texts: List[OCRTextResult]
     image_size: Optional[dict] = None
     language: str
@@ -34,13 +143,11 @@ class OCRResponse(BaseModel):
 
 
 class OCRBatchRequest(BaseModel):
-    """Para procesar múltiples imágenes en un solo request"""
-    images: List[str] = Field(..., description="Lista de imágenes en base64")
-    languages: Optional[List[str]] = Field(["es", "en"], description="Idiomas para reconocer")
+    images: List[str]
+    languages: Optional[List[str]] = ["es", "en"]
 
 
 class OCRDetectLanguagesResponse(BaseModel):
-    """Respuesta de detección de idiomas"""
     detected_languages: List[str]
     confidence: List[float]
 
@@ -48,93 +155,65 @@ class OCRDetectLanguagesResponse(BaseModel):
 # ======================
 # Endpoints
 # ======================
-@router.post("/recognize", response_model=OCRResponse)
-@limiter.limit("10/minute")
-async def recognize_text(
-    request: Request,
+@router.post("/recognize")
+async def recognize_ocr(
     file: UploadFile = File(...),
-    languages: Optional[str] = "es,en",
-    detail: bool = True,
-    api_key: str = Depends(verify_api_key)
+    detail: bool = Form(True),
+    paragraph: bool = Form(True),
+    languages: str = Form("es,en")
 ):
     """
-    Reconoce texto en una imagen.
-    
-    Args:
-        file: Imagen en formato JPEG, PNG, etc.
-        languages: Idiomas separados por coma (ej: "es,en,fr")
-        detail: Si True, retorna información detallada (bounding boxes)
+    Endpoint para reconocer texto en una imagen subida.
     """
     if not model_loader.ocr_model:
         raise HTTPException(status_code=503, detail="OCR no disponible")
     
     # Validar tipo de archivo
-    allowed_types = ["image/jpeg", "image/png", "image/bmp", "image/tiff", "image/webp"]
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Formato no soportado. Use: {', '.join(allowed_types)}")
-    
-    # Limitar tamaño (5MB)
-    contents = await file.read(5 * 1024 * 1024)
-    
-    # Convertir a lista de idiomas
-    lang_list = [lang.strip() for lang in languages.split(",")]
+    allowed_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp']
+    file_extension = file.filename.lower().split('.')[-1] if '.' in file.filename else ''
+    if file_extension not in [ext.lstrip('.') for ext in allowed_extensions]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato de archivo no soportado. Use: {', '.join(allowed_extensions)}"
+        )
     
     try:
-        # Procesar con OCR
-        result = model_loader.ocr_model.readtext(
+        start_time = time.time()
+        contents = await file.read()
+        
+        result = safe_readtext(
+            model_loader.ocr_model,
             contents,
             detail=detail,
-            paragraph=True,  # Agrupar en párrafos
-            decoder='beamsearch',  # Mejor precisión
-            beamWidth=5,
-            batch_size=1,
-            workers=0,
-            allowlist=None,
-            blocklist=None,
-            contrast_ths=0.1,
-            adjust_contrast=0.5,
-            filter_ths=0.003,
-            text_threshold=0.7,
-            low_text=0.4,
-            link_threshold=0.4,
-            canvas_size=2560,
-            mag_ratio=1.0,
-            slope_ths=0.1,
-            ycenter_ths=0.5,
-            height_ths=0.5,
-            width_ths=0.5,
-            add_margin=0.1,
-            x_ths=1.0,
-            y_ths=0.5,
-            reformat=True,
+            paragraph=paragraph
         )
         
-        # Formatear respuesta
-        texts = []
-        if detail:
-            for item in result:
-                bbox, text, confidence = item
-                texts.append(OCRTextResult(
-                    text=text,
-                    confidence=confidence,
-                    bbox=bbox.tolist() if hasattr(bbox, 'tolist') else bbox
-                ))
-        else:
-            for text in result:
-                texts.append(OCRTextResult(
-                    text=text,
-                    confidence=1.0,
-                    bbox=[[0, 0], [0, 0], [0, 0], [0, 0]]
-                ))
+        processing_time = time.time() - start_time
         
-        return OCRResponse(
-            texts=texts,
-            language=",".join(lang_list),
-            processing_time=0.0  # Podrías medir el tiempo real
-        )
+        # Obtener tamaño de imagen
+        image = Image.open(io.BytesIO(contents))
+        image_size = {"width": image.width, "height": image.height}
         
+        normalized_results = normalize_ocr_result(result, detail)
+        
+        return {
+            "engine": "easyocr",
+            "detail": detail,
+            "paragraph": paragraph,
+            "languages": languages.split(','),
+            "image_size": image_size,
+            "processing_time": round(processing_time, 3),
+            "results": normalized_results,
+            "total_texts": len(normalized_results)
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando imagen: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error procesando la imagen: {str(e)}"
+        )
 
 
 @router.post("/recognize-base64", response_model=OCRResponse)
@@ -145,50 +224,70 @@ async def recognize_text_base64(
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Reconoce texto en una imagen enviada en base64.
-    
-    Body:
-    ```json
-    {
-        "image": "base64_string",
-        "languages": ["es", "en"]
-    }
-    ```
+    Endpoint para reconocer texto en una imagen en base64.
     """
     if not model_loader.ocr_model:
         raise HTTPException(status_code=503, detail="OCR no disponible")
     
     try:
-        image_b64 = data.get("image", "")
-        languages = data.get("languages", ["es", "en"])
+        start_time = time.time()
         
-        if not image_b64:
-            raise HTTPException(status_code=400, detail="Se requiere campo 'image' en base64")
+        # Validar datos de entrada
+        if "image" not in data:
+            raise HTTPException(status_code=400, detail="Se requiere campo 'image'")
         
-        # Decodificar base64
-        image_data = base64.b64decode(image_b64)
+        image_bytes = base64.b64decode(data["image"])
+        image_np = bytes_to_np_image(image_bytes)
+        
+        # Obtener tamaño de imagen
+        image = Image.fromarray(image_np)
+        image_size = {"width": image.width, "height": image.height}
         
         # Procesar con OCR
-        result = model_loader.ocr_model.readtext(image_data, detail=True)
+        result = model_loader.ocr_model.readtext(
+            image_np,
+            detail=True,
+            paragraph=data.get("paragraph", True),
+            batch_size=1,
+            workers=0
+        )
         
-        # Formatear respuesta
+        processing_time = time.time() - start_time
+        
+        # Procesar resultados
         texts = []
         for item in result:
-            bbox, text, confidence = item
-            texts.append(OCRTextResult(
-                text=text,
-                confidence=confidence,
-                bbox=bbox.tolist() if hasattr(bbox, 'tolist') else bbox
-            ))
+            if isinstance(item, tuple) and len(item) >= 2:
+                if len(item) == 3:
+                    bbox, text, conf = item
+                else:  # len == 2
+                    bbox, text = item
+                    conf = 1.0
+                
+                # Convertir bbox si es necesario
+                if hasattr(bbox, "tolist"):
+                    bbox = bbox.tolist()
+                
+                texts.append(OCRTextResult(
+                    text=text,
+                    confidence=float(conf),
+                    bbox=bbox
+                ))
         
         return OCRResponse(
             texts=texts,
-            language=",".join(languages),
-            processing_time=0.0
+            image_size=image_size,
+            language=",".join(data.get("languages", ["es", "en"])),
+            processing_time=round(processing_time, 3)
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando imagen: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error procesando imagen base64: {str(e)}"
+        )
 
 
 @router.post("/batch", response_model=List[OCRResponse])
@@ -199,194 +298,176 @@ async def recognize_batch(
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Procesa múltiples imágenes en un solo request.
+    Endpoint para procesar múltiples imágenes en batch.
     """
     if not model_loader.ocr_model:
         raise HTTPException(status_code=503, detail="OCR no disponible")
-    
-    if len(data.images) > 10:
-        raise HTTPException(status_code=400, detail="Máximo 10 imágenes por batch")
     
     responses = []
     
     for i, image_b64 in enumerate(data.images):
         try:
-            # Decodificar base64
-            image_data = base64.b64decode(image_b64)
+            start_time = time.time()
+            image_np = bytes_to_np_image(base64.b64decode(image_b64))
             
-            # Procesar con OCR
+            # Obtener tamaño de imagen
+            image = Image.fromarray(image_np)
+            image_size = {"width": image.width, "height": image.height}
+            
             result = model_loader.ocr_model.readtext(
-                image_data,
+                image_np,
                 detail=True,
                 paragraph=True,
-                batch_size=1
+                batch_size=1,
+                workers=0
             )
             
-            # Formatear respuesta
+            processing_time = time.time() - start_time
+            
+            # Procesar resultados
             texts = []
             for item in result:
-                bbox, text, confidence = item
-                texts.append(OCRTextResult(
-                    text=text,
-                    confidence=confidence,
-                    bbox=bbox.tolist() if hasattr(bbox, 'tolist') else bbox,
-                    page=i
-                ))
+                if isinstance(item, tuple) and len(item) >= 2:
+                    if len(item) == 3:
+                        bbox, text, conf = item
+                    else:
+                        bbox, text = item
+                        conf = 1.0
+                    
+                    # Convertir bbox si es necesario
+                    if hasattr(bbox, "tolist"):
+                        bbox = bbox.tolist()
+                    
+                    texts.append(OCRTextResult(
+                        text=text,
+                        confidence=float(conf),
+                        bbox=bbox,
+                        page=i
+                    ))
             
             responses.append(OCRResponse(
                 texts=texts,
+                image_size=image_size,
                 language=",".join(data.languages),
-                processing_time=0.0
+                processing_time=round(processing_time, 3)
             ))
             
         except Exception as e:
+            # Continuar con otras imágenes incluso si una falla
             responses.append(OCRResponse(
                 texts=[],
+                image_size=None,
                 language=",".join(data.languages),
-                processing_time=0.0
+                processing_time=0.0,
+                error=f"Error procesando imagen {i}: {str(e)}"
             ))
     
     return responses
 
 
-@router.get("/detect-languages", response_model=OCRDetectLanguagesResponse)
-@limiter.limit("20/minute")
+@router.get("/info")
+async def ocr_info():
+    """
+    Endpoint para obtener información sobre el motor OCR.
+    """
+    reader = model_loader.ocr_model
+
+    if not reader:
+        raise HTTPException(status_code=503, detail="OCR no cargado")
+
+    try:
+        return {
+            "engine": "easyocr",
+            "version": "1.7.1",
+            "languages": reader.lang_list,
+            "gpu": reader.gpu,
+            "model_storage_directory": str(reader.model_storage_directory),
+            "detector": "craft_mlt_25k",
+            "recognizer": "english_g2",
+            "batch_size": 1,
+            "workers": 0,
+            "status": "ready",
+            "available_languages": [
+                "abq", "ady", "af", "ang", "ar", "as", "ava", "az", "be", "bg",
+                "bh", "bho", "bn", "bs", "ch_sim", "ch_tra", "che", "cs", "cy",
+                "da", "dar", "de", "en", "es", "et", "fa", "fr", "ga", "gom",
+                "hi", "hr", "hu", "id", "inh", "is", "it", "ja", "kbd", "kn",
+                "ko", "ku", "la", "lbe", "lez", "lt", "lv", "mah", "mai", "mi",
+                "mn", "mr", "ms", "mt", "ne", "new", "nl", "no", "oc", "pi",
+                "pl", "pt", "ro", "ru", "sk", "sl", "sq", "sv", "sw", "ta",
+                "tab", "te", "th", "tjk", "tl", "tr", "ug", "uk", "ur", "uz",
+                "vi"
+            ]
+        }
+    except Exception as e:
+        return {
+            "engine": "easyocr",
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@router.post("/detect-languages")
 async def detect_languages(
-    request: Request,
-    file: UploadFile = File(...),
-    api_key: str = Depends(verify_api_key)
+    file: UploadFile = File(...)
 ):
     """
-    Detecta los idiomas presentes en una imagen.
+    Endpoint para detectar idiomas en una imagen.
     """
     if not model_loader.ocr_model:
         raise HTTPException(status_code=503, detail="OCR no disponible")
     
     try:
-        contents = await file.read(5 * 1024 * 1024)
+        contents = await file.read()
+        image_np = bytes_to_np_image(contents)
         
-        # Primero extraemos el texto
-        result = model_loader.ocr_model.readtext(contents, detail=False)
+        # EasyOCR no tiene detección de idioma incorporada,
+        # pero podemos intentar detectar basado en caracteres
+        result = model_loader.ocr_model.readtext(
+            image_np,
+            detail=True,
+            paragraph=True,
+            batch_size=1,
+            workers=0
+        )
         
-        # Aquí podrías integrar un detector de idiomas
-        # Por ahora retornamos los idiomas configurados
-        # (EasyOCR detecta automáticamente entre los idiomas configurados)
+        # Analizar caracteres para detectar idioma
+        detected_chars = set()
+        for item in result:
+            if isinstance(item, tuple) and len(item) >= 2:
+                text = item[1] if len(item) >= 2 else str(item[0])
+                detected_chars.update(text)
         
-        # Este es un placeholder - en producción usarías un detector real
-        detected = ["es", "en"]
-        confidences = [0.8, 0.7]
+        # Detección simple basada en rangos Unicode
+        languages = []
+        confidences = []
+        
+        # Verificar caracteres latinos
+        if any(ord(c) < 128 for c in detected_chars):
+            languages.append("en")
+            confidences.append(0.8)
+        
+        # Verificar caracteres cirílicos
+        if any(0x0400 <= ord(c) <= 0x04FF for c in detected_chars):
+            languages.append("ru")
+            confidences.append(0.7)
+        
+        # Verificar caracteres árabes
+        if any(0x0600 <= ord(c) <= 0x06FF for c in detected_chars):
+            languages.append("ar")
+            confidences.append(0.7)
+        
+        if not languages:
+            languages = ["en"]
+            confidences = [0.5]
         
         return OCRDetectLanguagesResponse(
-            detected_languages=detected,
+            detected_languages=languages,
             confidence=confidences
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error detectando idiomas: {str(e)}")
-
-
-@router.get("/supported-languages")
-@limiter.limit("30/minute")
-async def get_supported_languages(
-    request: Request,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Retorna la lista de idiomas soportados por el OCR.
-    """
-    if not model_loader.ocr_model:
-        raise HTTPException(status_code=503, detail="OCR no disponible")
-    
-    # EasyOCR soporta muchos idiomas
-    supported_langs = [
-        "es", "en", "fr", "de", "it", "pt", "ru", "zh", "ja", "ko",
-        "ar", "hi", "bn", "tr", "vi", "th", "nl", "pl", "sv", "da",
-        "no", "fi", "el", "he", "id", "ms", "cs", "ro", "hu", "sk",
-        "uk", "hr", "ca", "fa", "sr", "ml", "ta", "te", "kn", "mr",
-        "gu", "pa", "ne", "si", "my", "km", "lo", "bo", "ti", "am",
-        "af", "az", "bs", "bg", "ceb", "co", "eo", "et", "eu", "fy",
-        "ga", "gd", "gl", "ha", "haw", "hmn", "ig", "is", "jw", "ka",
-        "kk", "ku", "ky", "la", "lb", "lt", "lv", "mg", "mi", "mk",
-        "mn", "mt", "ny", "ps", "sd", "sl", "sm", "sn", "so", "sq",
-        "st", "su", "sw", "tg", "tk", "tl", "tt", "ug", "ur", "uz",
-        "xh", "yi", "yo", "zu"
-    ]
-    
-    # Idiomas actualmente cargados en el modelo
-    loaded_langs = model_loader.ocr_model.lang_list
-    
-    return {
-        "supported_languages": supported_langs,
-        "currently_loaded": loaded_langs,
-        "total_supported": len(supported_langs)
-    }
-
-
-@router.get("/health")
-async def ocr_health():
-    """
-    Health check específico para OCR.
-    """
-    return {
-        "status": "active" if model_loader.ocr_model else "inactive",
-        "model_loaded": model_loader.ocr_model is not None,
-        "languages_loaded": model_loader.ocr_model.lang_list if model_loader.ocr_model else [],
-        "gpu_available": False  # EasyOCR detecta automáticamente
-    }
-
-
-# ======================
-# Utilitarios avanzados
-# ======================
-@router.post("/extract-tables")
-@limiter.limit("5/minute")
-async def extract_tables(
-    request: Request,
-    file: UploadFile = File(...),
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Intenta extraer tablas de una imagen.
-    (Requeriría lógica adicional para detección de tablas)
-    """
-    if not model_loader.ocr_model:
-        raise HTTPException(status_code=503, detail="OCR no disponible")
-    
-    # Esta es una implementación básica
-    # Para detección de tablas real necesitarías un modelo especializado
-    
-    try:
-        contents = await file.read(5 * 1024 * 1024)
-        
-        # Extraer todo el texto
-        result = model_loader.ocr_model.readtext(contents, detail=True, paragraph=True)
-        
-        # Simular detección de tablas basada en alineamiento
-        tables = []
-        current_table = []
-        
-        for item in result:
-            bbox, text, confidence = item
-            # Lógica simplificada para detectar filas/columnas
-            # En producción usarías un modelo de detección de tablas
-            
-            current_table.append({
-                "text": text,
-                "bbox": bbox.tolist() if hasattr(bbox, 'tolist') else bbox,
-                "confidence": confidence
-            })
-        
-        if current_table:
-            tables.append({
-                "rows": len(current_table),
-                "cells": current_table
-            })
-        
-        return {
-            "tables_found": len(tables),
-            "tables": tables,
-            "note": "Esta es una extracción básica. Para mejor precisión use un modelo especializado en tablas."
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extrayendo tablas: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error detectando idiomas: {str(e)}"
+        )
