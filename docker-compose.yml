@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: ai_api_service
+    ports:
+      - "8000:8000"
+    volumes:
+      # Montar directorio de modelos (CLAVE: modelos externos)
+      - ./data/models:/app/data/models
+      
+      # Opcional: montar .env para cambios sin rebuild
+      - ./.env:/app/.env
+      
+      # Opcional: para desarrollo (hot reload)
+      # - ./app:/app/app
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=False
+    restart: unless-stopped
+    
+    # Opcional: limitar recursos
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          memory: 4G
